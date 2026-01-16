@@ -1,74 +1,72 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-import feedparser
-import schedule
-import time
+from flask_socketio import SocketIO, emit
 import os
+import time
 from datetime import datetime
 from threading import Thread
 import re
-import requests
+from collections import deque
+import asyncio
+from telegram import Bot
+from telegram.ext import Application, MessageHandler, filters
+import tweepy
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'osint-monitor-secret'
+CORS(app, resources={r"/*": {"origins": "*"}})
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-CORS(app, resources={
-    r"/api/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
-
-# Storage
-feeds_storage = {}
+# Real-time storage
+intelligence_stream = deque(maxlen=1000)  # Keep last 1000 items
 conflict_data = {}
+active_sources = {}
 
-# Conflict definitions
 CONFLICTS = {
     'us_iran': {
         'name': 'US-Iran Tensions',
-        'keywords': ['iran', 'tehran', 'centcom', 'irgc', 'strait of hormuz', 'persian gulf', 'nuclear deal', 'sanctions iran'],
-        'escalation_keywords': ['strike iran', 'bombing iran', 'military action iran', 'war with iran', 'attack iran', 'iranian retaliation']
+        'keywords': ['iran', 'tehran', 'centcom', 'irgc', 'strait of hormuz', 'persian gulf'],
+        'escalation_keywords': ['strike iran', 'bombing iran', 'war with iran']
     },
     'israel_gaza': {
         'name': 'Israel-Gaza War',
-        'keywords': ['gaza', 'israel', 'hamas', 'idf', 'tel aviv', 'netanyahu', 'west bank', 'hezbollah lebanon'],
-        'escalation_keywords': ['ground invasion', 'mass casualties gaza', 'escalation lebanon', 'wider war', 'regional conflict']
+        'keywords': ['gaza', 'israel', 'hamas', 'idf', 'tel aviv', 'netanyahu', 'hezbollah'],
+        'escalation_keywords': ['ground invasion', 'mass casualties', 'escalation']
     },
     'russia_ukraine': {
         'name': 'Russia-Ukraine War',
-        'keywords': ['ukraine', 'russia', 'kyiv', 'moscow', 'putin', 'zelensky', 'donbas', 'crimea', 'nato ukraine'],
-        'escalation_keywords': ['nuclear threat', 'nato troops', 'offensive kyiv', 'tactical nuclear', 'article 5']
+        'keywords': ['ukraine', 'russia', 'kyiv', 'moscow', 'putin', 'zelensky'],
+        'escalation_keywords': ['nuclear threat', 'nato troops', 'offensive']
     },
     'us_china': {
         'name': 'US-China Relations',
-        'keywords': ['china', 'beijing', 'xi jinping', 'south china sea', 'trade war china', 'chips act'],
-        'escalation_keywords': ['military confrontation', 'blockade taiwan', 'invasion taiwan', 'us carrier strike']
+        'keywords': ['china', 'beijing', 'taiwan', 'south china sea'],
+        'escalation_keywords': ['military confrontation', 'invasion taiwan']
     },
     'korean_peninsula': {
         'name': 'Korean Peninsula',
-        'keywords': ['north korea', 'south korea', 'kim jong', 'pyongyang', 'seoul', 'nuclear test north korea'],
-        'escalation_keywords': ['missile launch korea', 'nuclear test', 'war footing', 'dmz incident']
+        'keywords': ['north korea', 'south korea', 'kim jong', 'pyongyang'],
+        'escalation_keywords': ['missile launch', 'nuclear test']
     },
     'arctic_greenland': {
         'name': 'Arctic & Greenland',
-        'keywords': ['greenland', 'arctic', 'denmark', 'trump greenland', 'northwest passage', 'arctic sovereignty'],
-        'escalation_keywords': ['military deployment greenland', 'annexation', 'arctic conflict']
+        'keywords': ['greenland', 'arctic', 'denmark'],
+        'escalation_keywords': ['military deployment', 'annexation']
     },
     'syria': {
         'name': 'Syria Situation',
-        'keywords': ['syria', 'damascus', 'assad', 'rebels syria', 'kurdish syria'],
-        'escalation_keywords': ['chemical weapons', 'turkish invasion', 'isis resurgence']
+        'keywords': ['syria', 'damascus', 'assad'],
+        'escalation_keywords': ['chemical weapons', 'isis']
     },
     'taiwan_strait': {
         'name': 'Taiwan Strait',
-        'keywords': ['taiwan', 'taipei', 'strait crossing', 'china taiwan'],
-        'escalation_keywords': ['chinese naval', 'invasion preparation', 'taiwanese mobilization']
+        'keywords': ['taiwan', 'taipei', 'strait'],
+        'escalation_keywords': ['chinese naval', 'invasion']
     },
     'us_domestic': {
         'name': 'US Domestic Politics',
-        'keywords': ['trump', 'biden', 'congress', 'senate', 'white house', 'supreme court', 'election', 'capitol'],
-        'escalation_keywords': ['impeachment', 'constitutional crisis', 'political violence', 'insurrection']
+        'keywords': ['trump', 'biden', 'congress', 'white house'],
+        'escalation_keywords': ['impeachment', 'crisis']
     }
 }
 
@@ -79,9 +77,6 @@ WORLD_CITIES = {
     'moscow': {'name': 'Moscow', 'lat': 55.7558, 'lon': 37.6173, 'country': 'Russia'},
     'kyiv': {'name': 'Kyiv', 'lat': 50.4501, 'lon': 30.5234, 'country': 'Ukraine'},
     'beijing': {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'country': 'China'},
-    'seoul': {'name': 'Seoul', 'lat': 37.5665, 'lon': 126.9780, 'country': 'South Korea'},
-    'damascus': {'name': 'Damascus', 'lat': 33.5138, 'lon': 36.2765, 'country': 'Syria'},
-    'taipei': {'name': 'Taipei', 'lat': 25.0330, 'lon': 121.5654, 'country': 'Taiwan'},
 }
 
 def assess_threat_level(items):
@@ -89,148 +84,195 @@ def assess_threat_level(items):
         return 'green'
     
     total_text = ' '.join([item.get('title', '') + ' ' + item.get('description', '') for item in items]).lower()
+    critical = ['imminent', 'hours away', 'preparing to strike', 'war declared']
+    elevated = ['tensions rising', 'troops deployed', 'military buildup']
     
-    critical_keywords = ['imminent', 'hours away', 'preparing to strike', 'red alert', 'mobilization complete', 'war declared']
-    elevated_keywords = ['tensions rising', 'troops deployed', 'military buildup', 'threatening', 'brink of war']
-    
-    if any(kw in total_text for kw in critical_keywords):
+    if any(k in total_text for k in critical):
         return 'red'
-    elif sum(1 for kw in elevated_keywords if kw in total_text) >= 2:
-        return 'yellow'
-    elif any(kw in total_text for kw in elevated_keywords):
+    elif sum(1 for k in elevated if k in total_text) >= 2:
         return 'yellow'
     return 'green'
 
-def categorize_by_conflict(title, description):
-    text = (title + ' ' + description).lower()
-    conflicts_found = []
-    
+def categorize_by_conflict(text):
+    text = text.lower()
+    conflicts = []
     for conflict_key, conflict_info in CONFLICTS.items():
-        if any(keyword in text for keyword in conflict_info['keywords']):
-            conflicts_found.append(conflict_key)
-    
-    return conflicts_found if conflicts_found else ['uncategorized']
+        if any(k in text for k in conflict_info['keywords']):
+            conflicts.append(conflict_key)
+    return conflicts if conflicts else ['uncategorized']
 
-def fetch_feed(feed_id, feed_url):
-    try:
-        print(f"[FETCH] {feed_url}")
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/rss+xml, application/xml, text/xml, */*'
-        }
-        
-        response = requests.get(feed_url, headers=headers, timeout=30)
-        
-        if response.status_code != 200:
-            print(f"[ERROR] HTTP {response.status_code}")
-            return []
-        
-        feed = feedparser.parse(response.content)
-        
-        if not feed.entries:
-            print(f"[WARNING] No entries in feed")
-            return []
-        
-        items = []
-        for entry in feed.entries[:15]:
-            title = entry.get('title', 'No title')
-            description = entry.get('description', entry.get('summary', ''))
-            link = entry.get('link', '')
-            pub_date = entry.get('published', entry.get('updated', ''))
-            
-            clean_desc = re.sub('<[^<]+?>', '', description)
-            conflicts = categorize_by_conflict(title, clean_desc)
-            
-            items.append({
-                'title': title,
-                'description': clean_desc[:300],
-                'link': link,
-                'timestamp': pub_date,
-                'conflicts': conflicts,
-                'feed_id': feed_id
-            })
-        
-        print(f"[SUCCESS] {len(items)} items")
-        return items
-        
-    except Exception as e:
-        print(f"[ERROR] {e}")
-        return []
-
-def update_all_feeds():
-    global conflict_data
+def process_intelligence(title, description, source, link=''):
+    """Process and broadcast new intelligence"""
+    timestamp = datetime.now().isoformat()
+    text = title + ' ' + description
+    conflicts = categorize_by_conflict(text)
     
-    print(f"[UPDATE] Starting at {datetime.now()}")
-    
-    conflict_data = {k: [] for k in CONFLICTS.keys()}
-    conflict_data['uncategorized'] = []
-    
-    total_items = 0
-    for feed_id, feed_info in feeds_storage.items():
-        items = fetch_feed(feed_id, feed_info['url'])
-        total_items += len(items)
-        
-        feeds_storage[feed_id]['items'] = items
-        feeds_storage[feed_id]['last_update'] = datetime.now().isoformat()
-        
-        for item in items:
-            for conflict in item['conflicts']:
-                if conflict in conflict_data:
-                    conflict_data[conflict].append(item)
-    
-    print(f"[UPDATE] Complete: {len(feeds_storage)} feeds, {total_items} items")
-
-def background_updater():
-    print("[BACKGROUND] Starting updater")
-    time.sleep(3)
-    update_all_feeds()
-    
-    schedule.every(2).minutes.do(update_all_feeds)
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
-
-@app.route('/api/feeds', methods=['GET'])
-def get_feeds():
-    return jsonify(list(feeds_storage.values()))
-
-@app.route('/api/feeds', methods=['POST'])
-def add_feed():
-    data = request.json
-    feed_id = str(int(time.time() * 1000))
-    
-    feeds_storage[feed_id] = {
-        'id': feed_id,
-        'name': data['name'],
-        'url': data['url'],
-        'source': data.get('source', 'telegram'),
-        'items': [],
-        'last_update': None
+    intel = {
+        'title': title,
+        'description': description[:300],
+        'source': source,
+        'link': link,
+        'timestamp': timestamp,
+        'conflicts': conflicts,
+        'id': int(time.time() * 1000)
     }
     
-    items = fetch_feed(feed_id, data['url'])
-    feeds_storage[feed_id]['items'] = items
-    feeds_storage[feed_id]['last_update'] = datetime.now().isoformat()
+    # Add to stream
+    intelligence_stream.appendleft(intel)
     
-    for item in items:
-        for conflict in item['conflicts']:
-            if conflict not in conflict_data:
-                conflict_data[conflict] = []
-            conflict_data[conflict].append(item)
+    # Add to conflict categories
+    for conflict in conflicts:
+        if conflict not in conflict_data:
+            conflict_data[conflict] = []
+        conflict_data[conflict].insert(0, intel)
+        # Keep only last 100 per conflict
+        conflict_data[conflict] = conflict_data[conflict][:100]
     
-    return jsonify({'success': True, 'feed': feeds_storage[feed_id]})
+    # Broadcast via WebSocket
+    socketio.emit('new_intelligence', intel, broadcast=True)
+    
+    print(f"[INTEL] {source}: {title[:50]}")
+    return intel
 
-@app.route('/api/feeds/<feed_id>', methods=['DELETE'])
-def delete_feed(feed_id):
-    if feed_id in feeds_storage:
-        del feeds_storage[feed_id]
-        return jsonify({'success': True})
-    return jsonify({'success': False}), 404
+# Telegram Bot Handler
+telegram_apps = {}
+
+async def telegram_message_handler(update, context):
+    """Handle incoming Telegram messages"""
+    try:
+        chat = update.effective_chat
+        message = update.message
+        
+        if not message or not message.text:
+            return
+        
+        source_name = chat.title or chat.username or 'Telegram'
+        
+        process_intelligence(
+            title=f"[{source_name}] New Update",
+            description=message.text,
+            source='telegram',
+            link=f"https://t.me/{chat.username}/{message.message_id}" if chat.username else ''
+        )
+    except Exception as e:
+        print(f"[ERROR] Telegram handler: {e}")
+
+def start_telegram_monitor(bot_token, channel_username):
+    """Start monitoring a Telegram channel"""
+    try:
+        async def run_bot():
+            application = Application.builder().token(bot_token).build()
+            application.add_handler(MessageHandler(filters.ALL, telegram_message_handler))
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling()
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_bot())
+        
+    except Exception as e:
+        print(f"[ERROR] Telegram monitor: {e}")
+
+# Twitter Stream Handler
+class TwitterStreamListener(tweepy.StreamingClient):
+    def on_tweet(self, tweet):
+        try:
+            process_intelligence(
+                title=f"@{tweet.author.username}",
+                description=tweet.text,
+                source='twitter',
+                link=f"https://twitter.com/i/web/status/{tweet.id}"
+            )
+        except Exception as e:
+            print(f"[ERROR] Twitter handler: {e}")
+
+twitter_stream = None
+
+def start_twitter_monitor(bearer_token, keywords):
+    """Start monitoring Twitter for keywords"""
+    global twitter_stream
+    try:
+        twitter_stream = TwitterStreamListener(bearer_token)
+        
+        # Delete existing rules
+        rules = twitter_stream.get_rules()
+        if rules.data:
+            twitter_stream.delete_rules([rule.id for rule in rules.data])
+        
+        # Add new rules
+        for keyword in keywords:
+            twitter_stream.add_rules(tweepy.StreamRule(keyword))
+        
+        # Start stream
+        twitter_stream.filter(tweet_fields=['author_id', 'created_at'])
+        
+    except Exception as e:
+        print(f"[ERROR] Twitter monitor: {e}")
+
+# API Endpoints
+@app.route('/api/sources', methods=['POST'])
+def add_source():
+    """Add a monitoring source"""
+    data = request.json
+    source_type = data.get('type')  # 'telegram' or 'twitter'
+    
+    if source_type == 'telegram':
+        bot_token = data.get('bot_token')
+        channel = data.get('channel')
+        
+        if not bot_token or not channel:
+            return jsonify({'success': False, 'error': 'Missing bot_token or channel'}), 400
+        
+        # Start monitoring in background thread
+        thread = Thread(target=start_telegram_monitor, args=(bot_token, channel), daemon=True)
+        thread.start()
+        
+        source_id = f"tg_{channel}"
+        active_sources[source_id] = {
+            'type': 'telegram',
+            'channel': channel,
+            'started': datetime.now().isoformat()
+        }
+        
+        return jsonify({'success': True, 'source_id': source_id})
+    
+    elif source_type == 'twitter':
+        bearer_token = data.get('bearer_token')
+        keywords = data.get('keywords', [])
+        
+        if not bearer_token or not keywords:
+            return jsonify({'success': False, 'error': 'Missing bearer_token or keywords'}), 400
+        
+        # Start monitoring in background thread
+        thread = Thread(target=start_twitter_monitor, args=(bearer_token, keywords), daemon=True)
+        thread.start()
+        
+        source_id = f"tw_{int(time.time())}"
+        active_sources[source_id] = {
+            'type': 'twitter',
+            'keywords': keywords,
+            'started': datetime.now().isoformat()
+        }
+        
+        return jsonify({'success': True, 'source_id': source_id})
+    
+    return jsonify({'success': False, 'error': 'Invalid source type'}), 400
+
+@app.route('/api/sources', methods=['GET'])
+def get_sources():
+    """Get active monitoring sources"""
+    return jsonify(active_sources)
+
+@app.route('/api/stream', methods=['GET'])
+def get_stream():
+    """Get recent intelligence stream"""
+    limit = int(request.args.get('limit', 100))
+    return jsonify(list(intelligence_stream)[:limit])
 
 @app.route('/api/conflicts', methods=['GET'])
 def get_conflicts():
+    """Get conflicts with threat levels"""
     result = {}
     for conflict_key, conflict_info in CONFLICTS.items():
         items = conflict_data.get(conflict_key, [])
@@ -238,56 +280,47 @@ def get_conflicts():
             'name': conflict_info['name'],
             'threat_level': assess_threat_level(items),
             'count': len(items),
-            'items': items
+            'items': items[:50]  # Return last 50
         }
     
     result['uncategorized'] = {
         'name': 'Other News',
         'threat_level': 'green',
         'count': len(conflict_data.get('uncategorized', [])),
-        'items': conflict_data.get('uncategorized', [])
+        'items': conflict_data.get('uncategorized', [])[:50]
     }
     
     return jsonify(result)
 
 @app.route('/api/cities', methods=['GET'])
 def get_cities():
-    city_threats = {}
-    
-    for city_key, city_info in WORLD_CITIES.items():
-        city_threats[city_key] = {
-            'name': city_info['name'],
-            'lat': city_info['lat'],
-            'lon': city_info['lon'],
-            'country': city_info['country'],
-            'threat': 'green',
-            'count': 0
-        }
-    
-    return jsonify(city_threats)
-
-@app.route('/api/refresh', methods=['POST'])
-def manual_refresh():
-    try:
-        update_all_feeds()
-        return jsonify({'success': True, 'timestamp': datetime.now().isoformat()})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    """Get city threat levels"""
+    return jsonify({k: {**v, 'threat': 'green', 'count': 0} for k, v in WORLD_CITIES.items()})
 
 @app.route('/api/health', methods=['GET'])
-def health_check():
+def health():
     return jsonify({
         'status': 'healthy',
-        'feeds_count': len(feeds_storage),
+        'sources': len(active_sources),
+        'intel_count': len(intelligence_stream),
         'timestamp': datetime.now().isoformat()
     })
 
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({'service': 'OSINT Monitor v2', 'status': 'running'})
+    return jsonify({'service': 'OSINT Real-Time Monitor', 'status': 'running'})
+
+# WebSocket event
+@socketio.on('connect')
+def handle_connect():
+    print('[WEBSOCKET] Client connected')
+    emit('connection_status', {'status': 'connected'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('[WEBSOCKET] Client disconnected')
 
 if __name__ == '__main__':
-    updater_thread = Thread(target=background_updater, daemon=True)
-    updater_thread.start()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    print("[STARTUP] OSINT Real-Time Monitor")
+    print("[INFO] Waiting for source configuration...")
+    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
