@@ -203,13 +203,19 @@ def update_all_feeds():
     """Update all feeds"""
     global conflict_data, city_data
     
+    update_start = datetime.now()
+    print(f"[UPDATE] Starting feed update cycle at {update_start}")
+    
     # Reset
     conflict_data = {k: [] for k in CONFLICTS.keys()}
     conflict_data['uncategorized'] = []
     city_data = {city: [] for city in WORLD_CITIES.keys()}
     
+    total_items = 0
     for feed_id, feed_info in feeds_storage.items():
+        print(f"[UPDATE] Fetching feed: {feed_info['name']}")
         items = fetch_feed(feed_id, feed_info['url'])
+        total_items += len(items)
         
         feeds_storage[feed_id]['items'] = items
         feeds_storage[feed_id]['last_update'] = datetime.now().isoformat()
@@ -219,14 +225,27 @@ def update_all_feeds():
                 if conflict in conflict_data:
                     conflict_data[conflict].append(item)
     
-    print(f"Updated {len(feeds_storage)} feeds at {datetime.now()}")
+    update_duration = (datetime.now() - update_start).total_seconds()
+    print(f"[UPDATE] Completed! Updated {len(feeds_storage)} feeds, {total_items} total items in {update_duration:.2f}s")
 
 def background_updater():
     """Background updates"""
+    print("[BACKGROUND] Starting background updater thread")
+    
+    # Initial update on startup
+    time.sleep(5)  # Wait for app to fully start
+    print("[BACKGROUND] Running initial feed update")
+    update_all_feeds()
+    
     schedule.every(2).minutes.do(update_all_feeds)
+    
     while True:
-        schedule.run_pending()
-        time.sleep(30)
+        try:
+            schedule.run_pending()
+            time.sleep(30)
+        except Exception as e:
+            print(f"[ERROR] Background updater error: {e}")
+            time.sleep(30)
 
 # API Endpoints
 @app.route('/api/feeds', methods=['GET'])
@@ -322,6 +341,22 @@ def health_check():
         'feeds_count': len(feeds_storage),
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/api/refresh', methods=['POST'])
+def manual_refresh():
+    """Manually trigger feed refresh"""
+    try:
+        update_all_feeds()
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'feeds_updated': len(feeds_storage)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/', methods=['GET'])
 def home():
