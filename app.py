@@ -27,7 +27,55 @@ categorized_data = {
     'asia': [],
     'americas': [],
     'africa': [],
-    'uncategorized': []
+    'uncategorized': [],
+    'us_politics': []
+}
+
+# City-level tracking
+city_data = {}
+
+# Major world cities with coordinates
+WORLD_CITIES = {
+    # Americas
+    'washington_dc': {'name': 'Washington D.C.', 'lat': 38.9072, 'lon': -77.0369, 'region': 'americas'},
+    'new_york': {'name': 'New York', 'lat': 40.7128, 'lon': -74.0060, 'region': 'americas'},
+    'mexico_city': {'name': 'Mexico City', 'lat': 19.4326, 'lon': -99.1332, 'region': 'americas'},
+    'caracas': {'name': 'Caracas', 'lat': 10.4806, 'lon': -66.9036, 'region': 'americas'},
+    'brasilia': {'name': 'Brasília', 'lat': -15.8267, 'lon': -47.9218, 'region': 'americas'},
+    
+    # Europe
+    'london': {'name': 'London', 'lat': 51.5074, 'lon': -0.1278, 'region': 'europe'},
+    'paris': {'name': 'Paris', 'lat': 48.8566, 'lon': 2.3522, 'region': 'europe'},
+    'berlin': {'name': 'Berlin', 'lat': 52.5200, 'lon': 13.4050, 'region': 'europe'},
+    'moscow': {'name': 'Moscow', 'lat': 55.7558, 'lon': 37.6173, 'region': 'europe'},
+    'kyiv': {'name': 'Kyiv', 'lat': 50.4501, 'lon': 30.5234, 'region': 'europe'},
+    'warsaw': {'name': 'Warsaw', 'lat': 52.2297, 'lon': 21.0122, 'region': 'europe'},
+    
+    # Middle East
+    'tehran': {'name': 'Tehran', 'lat': 35.6892, 'lon': 51.3890, 'region': 'middle_east'},
+    'tel_aviv': {'name': 'Tel Aviv', 'lat': 32.0853, 'lon': 34.7818, 'region': 'middle_east'},
+    'jerusalem': {'name': 'Jerusalem', 'lat': 31.7683, 'lon': 35.2137, 'region': 'middle_east'},
+    'baghdad': {'name': 'Baghdad', 'lat': 33.3152, 'lon': 44.3661, 'region': 'middle_east'},
+    'damascus': {'name': 'Damascus', 'lat': 33.5138, 'lon': 36.2765, 'region': 'middle_east'},
+    'beirut': {'name': 'Beirut', 'lat': 33.8886, 'lon': 35.4955, 'region': 'middle_east'},
+    'riyadh': {'name': 'Riyadh', 'lat': 24.7136, 'lon': 46.6753, 'region': 'middle_east'},
+    'cairo': {'name': 'Cairo', 'lat': 30.0444, 'lon': 31.2357, 'region': 'middle_east'},
+    'dubai': {'name': 'Dubai', 'lat': 25.2048, 'lon': 55.2708, 'region': 'middle_east'},
+    
+    # Asia
+    'beijing': {'name': 'Beijing', 'lat': 39.9042, 'lon': 116.4074, 'region': 'asia'},
+    'tokyo': {'name': 'Tokyo', 'lat': 35.6762, 'lon': 139.6503, 'region': 'asia'},
+    'seoul': {'name': 'Seoul', 'lat': 37.5665, 'lon': 126.9780, 'region': 'asia'},
+    'new_delhi': {'name': 'New Delhi', 'lat': 28.6139, 'lon': 77.2090, 'region': 'asia'},
+    'islamabad': {'name': 'Islamabad', 'lat': 33.6844, 'lon': 73.0479, 'region': 'asia'},
+    'bangkok': {'name': 'Bangkok', 'lat': 13.7563, 'lon': 100.5018, 'region': 'asia'},
+    'manila': {'name': 'Manila', 'lat': 14.5995, 'lon': 120.9842, 'region': 'asia'},
+    
+    # Africa
+    'nairobi': {'name': 'Nairobi', 'lat': -1.2864, 'lon': 36.8172, 'region': 'africa'},
+    'lagos': {'name': 'Lagos', 'lat': 6.5244, 'lon': 3.3792, 'region': 'africa'},
+    'addis_ababa': {'name': 'Addis Ababa', 'lat': 9.0320, 'lon': 38.7469, 'region': 'africa'},
+    'khartoum': {'name': 'Khartoum', 'lat': 15.5007, 'lon': 32.5599, 'region': 'africa'},
 }
 
 # Keywords for auto-categorization
@@ -35,21 +83,63 @@ REGION_KEYWORDS = {
     'middle_east': ['israel', 'gaza', 'palestine', 'iran', 'iraq', 'syria', 'lebanon', 'yemen', 'saudi', 'uae', 'turkey', 'egypt'],
     'europe': ['ukraine', 'russia', 'nato', 'eu', 'moscow', 'kyiv', 'kiev', 'poland', 'germany', 'france', 'uk', 'britain'],
     'asia': ['china', 'taiwan', 'japan', 'korea', 'india', 'pakistan', 'philippines', 'vietnam', 'beijing'],
-    'americas': ['usa', 'us', 'america', 'mexico', 'canada', 'brazil', 'venezuela', 'colombia'],
-    'africa': ['sudan', 'ethiopia', 'somalia', 'nigeria', 'libya', 'egypt', 'congo', 'sahel']
+    'americas': ['mexico', 'canada', 'brazil', 'venezuela', 'colombia', 'argentina'],
+    'africa': ['sudan', 'ethiopia', 'somalia', 'nigeria', 'libya', 'congo', 'sahel'],
+    'us_politics': ['trump', 'biden', 'congress', 'senate', 'white house', 'supreme court', 'election', 'republican', 'democrat', 'washington', 'capitol']
 }
 
-CONFLICT_KEYWORDS = ['war', 'conflict', 'strike', 'attack', 'military', 'troops', 'casualties', 'combat', 'offensive', 'defense']
+CITY_KEYWORDS = {
+    'washington_dc': ['washington', 'dc', 'white house', 'capitol', 'pentagon'],
+    'new_york': ['new york', 'nyc', 'manhattan'],
+    'moscow': ['moscow', 'kremlin'],
+    'kyiv': ['kyiv', 'kiev'],
+    'london': ['london', 'uk'],
+    'paris': ['paris', 'france'],
+    'berlin': ['berlin', 'germany'],
+    'tehran': ['tehran', 'iran'],
+    'tel_aviv': ['tel aviv', 'israel'],
+    'jerusalem': ['jerusalem'],
+    'baghdad': ['baghdad'],
+    'damascus': ['damascus', 'syria'],
+    'beirut': ['beirut', 'lebanon'],
+    'beijing': ['beijing', 'china'],
+    'tokyo': ['tokyo', 'japan'],
+    'seoul': ['seoul', 'korea'],
+    'cairo': ['cairo', 'egypt'],
+    'riyadh': ['riyadh', 'saudi'],
+    'mexico_city': ['mexico city'],
+    'caracas': ['caracas', 'venezuela'],
+}
+
+CONFLICT_KEYWORDS = ['war', 'conflict', 'strike', 'attack', 'military', 'troops', 'casualties', 'combat', 'offensive', 'defense', 'bombing', 'explosion']
 
 def categorize_item(title, description):
     """Categorize item by region based on keywords"""
     text = (title + ' ' + description).lower()
     
+    # Check for US politics first
+    us_keywords = REGION_KEYWORDS.get('us_politics', [])
+    if any(keyword in text for keyword in us_keywords):
+        return 'us_politics'
+    
     for region, keywords in REGION_KEYWORDS.items():
+        if region == 'us_politics':
+            continue
         if any(keyword in text for keyword in keywords):
             return region
     
     return 'uncategorized'
+
+def categorize_by_city(title, description):
+    """Categorize item by city"""
+    text = (title + ' ' + description).lower()
+    cities_found = []
+    
+    for city_key, keywords in CITY_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            cities_found.append(city_key)
+    
+    return cities_found
 
 def calculate_priority(title, description):
     """Calculate priority based on conflict keywords"""
@@ -109,6 +199,7 @@ def fetch_feed(feed_id, feed_url):
             
             region = categorize_item(title, clean_desc)
             priority = calculate_priority(title, clean_desc)
+            cities = categorize_by_city(title, clean_desc)
             
             item = {
                 'title': title,
@@ -117,6 +208,7 @@ def fetch_feed(feed_id, feed_url):
                 'timestamp': pub_date,
                 'region': region,
                 'priority': priority,
+                'cities': cities,
                 'feed_id': feed_id
             }
             
@@ -133,11 +225,14 @@ def fetch_feed(feed_id, feed_url):
 
 def update_all_feeds():
     """Update all registered feeds"""
-    global categorized_data
+    global categorized_data, city_data
     
     # Reset categorized data
     for region in categorized_data:
         categorized_data[region] = []
+    
+    # Reset city data
+    city_data = {city: [] for city in WORLD_CITIES.keys()}
     
     for feed_id, feed_info in feeds_storage.items():
         items = fetch_feed(feed_id, feed_info['url'])
@@ -146,10 +241,15 @@ def update_all_feeds():
         feeds_storage[feed_id]['items'] = items
         feeds_storage[feed_id]['last_update'] = datetime.now().isoformat()
         
-        # Categorize items by region
+        # Categorize items by region and city
         for item in items:
             region = item['region']
             categorized_data[region].append(item)
+            
+            # Add to city data
+            for city in item.get('cities', []):
+                if city in city_data:
+                    city_data[city].append(item)
     
     print(f"Updated {len(feeds_storage)} feeds at {datetime.now()}")
 
@@ -192,6 +292,12 @@ def add_feed():
         region = item['region']
         if region in categorized_data:
             categorized_data[region].append(item)
+        
+        # Update city data
+        for city in item.get('cities', []):
+            if city not in city_data:
+                city_data[city] = []
+            city_data[city].append(item)
     
     return jsonify({'success': True, 'feed': feeds_storage[feed_id]})
 
@@ -207,6 +313,43 @@ def delete_feed(feed_id):
 def get_categorized():
     """Get all items categorized by region"""
     return jsonify(categorized_data)
+
+@app.route('/api/cities', methods=['GET'])
+def get_cities():
+    """Get city data with activity levels"""
+    city_activity = {}
+    for city_key, city_info in WORLD_CITIES.items():
+        item_count = len(city_data.get(city_key, []))
+        
+        # Determine activity level
+        if item_count >= 5:
+            activity = 'red'
+        elif item_count >= 2:
+            activity = 'yellow'
+        else:
+            activity = 'green'
+        
+        city_activity[city_key] = {
+            'name': city_info['name'],
+            'lat': city_info['lat'],
+            'lon': city_info['lon'],
+            'region': city_info['region'],
+            'count': item_count,
+            'activity': activity,
+            'items': city_data.get(city_key, [])
+        }
+    
+    return jsonify(city_activity)
+
+@app.route('/api/city/<city_key>', methods=['GET'])
+def get_city_items(city_key):
+    """Get items for a specific city"""
+    if city_key in city_data:
+        return jsonify({
+            'city': WORLD_CITIES.get(city_key, {}).get('name', city_key),
+            'items': city_data[city_key]
+        })
+    return jsonify({'city': city_key, 'items': []})
 
 @app.route('/api/refresh', methods=['POST'])
 def refresh_feeds():
@@ -235,6 +378,8 @@ def home():
             'POST /api/feeds': 'Add new feed',
             'DELETE /api/feeds/<id>': 'Delete feed',
             'GET /api/categorized': 'Get categorized items',
+            'GET /api/cities': 'Get city activity map',
+            'GET /api/city/<key>': 'Get items for specific city',
             'POST /api/refresh': 'Refresh all feeds'
         }
     })
