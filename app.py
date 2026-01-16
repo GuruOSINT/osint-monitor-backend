@@ -68,10 +68,31 @@ def fetch_feed(feed_id, feed_url):
     """Fetch and parse RSS feed"""
     try:
         print(f"[DEBUG] Fetching feed {feed_id} from {feed_url}")
-        feed = feedparser.parse(feed_url)
+        
+        # Add user agent and headers to avoid being blocked
+        feed = feedparser.parse(feed_url, agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         
         print(f"[DEBUG] Feed status: {feed.get('status', 'unknown')}")
         print(f"[DEBUG] Feed entries count: {len(feed.entries)}")
+        
+        # Check for HTTP errors
+        if hasattr(feed, 'status') and feed.status == 403:
+            print(f"[ERROR] 403 Forbidden - RSSHub is blocking this request")
+            print(f"[INFO] Trying alternative method...")
+            # Try with requests library as fallback
+            import requests
+            try:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+                }
+                response = requests.get(feed_url, headers=headers, timeout=30)
+                print(f"[DEBUG] Requests library status: {response.status_code}")
+                if response.status_code == 200:
+                    feed = feedparser.parse(response.content)
+                    print(f"[DEBUG] Retry successful! Entries: {len(feed.entries)}")
+            except Exception as req_error:
+                print(f"[ERROR] Requests fallback failed: {req_error}")
         
         if hasattr(feed, 'bozo') and feed.bozo:
             print(f"[DEBUG] Feed parsing warning: {feed.bozo_exception}")
@@ -165,6 +186,12 @@ def add_feed():
     items = fetch_feed(feed_id, data['url'])
     feeds_storage[feed_id]['items'] = items
     feeds_storage[feed_id]['last_update'] = datetime.now().isoformat()
+    
+    # Update categorized data with new items
+    for item in items:
+        region = item['region']
+        if region in categorized_data:
+            categorized_data[region].append(item)
     
     return jsonify({'success': True, 'feed': feeds_storage[feed_id]})
 
