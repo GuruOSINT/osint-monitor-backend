@@ -150,24 +150,28 @@ def fetch_feed(feed_id, feed_url):
     try:
         print(f"[DEBUG] Fetching feed {feed_id} from {feed_url}")
         
-        feed = feedparser.parse(feed_url, agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        # Force fresh fetch with no-cache headers
+        import requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+        }
         
-        print(f"[DEBUG] Feed status: {feed.get('status', 'unknown')}")
+        try:
+            response = requests.get(feed_url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                feed = feedparser.parse(response.content)
+            else:
+                print(f"[ERROR] HTTP {response.status_code} for feed {feed_id}")
+                return []
+        except Exception as req_error:
+            print(f"[ERROR] Request failed: {req_error}")
+            # Fallback to feedparser
+            feed = feedparser.parse(feed_url, agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
         print(f"[DEBUG] Feed entries count: {len(feed.entries)}")
-        
-        if hasattr(feed, 'status') and feed.status == 403:
-            print(f"[ERROR] 403 Forbidden")
-            import requests
-            try:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
-                }
-                response = requests.get(feed_url, headers=headers, timeout=30)
-                if response.status_code == 200:
-                    feed = feedparser.parse(response.content)
-            except Exception as req_error:
-                print(f"[ERROR] Fallback failed: {req_error}")
         
         items = []
         for entry in feed.entries[:15]:
