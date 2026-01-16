@@ -8,8 +8,13 @@ from datetime import datetime
 from threading import Thread
 import re
 
-app = Flask(__name__)
-CORS(app)  # Allow requests from your frontend
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})  # Allow requests from any origin
 
 # Storage for feeds and their data
 feeds_storage = {}
