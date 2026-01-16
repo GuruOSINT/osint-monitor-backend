@@ -1,4 +1,65 @@
-elif conflict_count >= 1:
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import feedparser
+import schedule
+import time
+import os
+from datetime import datetime
+from threading import Thread
+import re
+
+app = Flask(__name__)
+
+# Configure CORS to allow requests from any origin
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
+
+# Storage for feeds and their data
+feeds_storage = {}
+categorized_data = {
+    'middle_east': [],
+    'europe': [],
+    'asia': [],
+    'americas': [],
+    'africa': [],
+    'uncategorized': []
+}
+
+# Keywords for auto-categorization
+REGION_KEYWORDS = {
+    'middle_east': ['israel', 'gaza', 'palestine', 'iran', 'iraq', 'syria', 'lebanon', 'yemen', 'saudi', 'uae', 'turkey', 'egypt'],
+    'europe': ['ukraine', 'russia', 'nato', 'eu', 'moscow', 'kyiv', 'kiev', 'poland', 'germany', 'france', 'uk', 'britain'],
+    'asia': ['china', 'taiwan', 'japan', 'korea', 'india', 'pakistan', 'philippines', 'vietnam', 'beijing'],
+    'americas': ['usa', 'us', 'america', 'mexico', 'canada', 'brazil', 'venezuela', 'colombia'],
+    'africa': ['sudan', 'ethiopia', 'somalia', 'nigeria', 'libya', 'egypt', 'congo', 'sahel']
+}
+
+CONFLICT_KEYWORDS = ['war', 'conflict', 'strike', 'attack', 'military', 'troops', 'casualties', 'combat', 'offensive', 'defense']
+
+def categorize_item(title, description):
+    """Categorize item by region based on keywords"""
+    text = (title + ' ' + description).lower()
+    
+    for region, keywords in REGION_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return region
+    
+    return 'uncategorized'
+
+def calculate_priority(title, description):
+    """Calculate priority based on conflict keywords"""
+    text = (title + ' ' + description).lower()
+    
+    conflict_count = sum(1 for keyword in CONFLICT_KEYWORDS if keyword in text)
+    
+    if conflict_count >= 3:
+        return 'high'
+    elif conflict_count >= 1:
         return 'medium'
     else:
         return 'low'
@@ -6,14 +67,21 @@ elif conflict_count >= 1:
 def fetch_feed(feed_id, feed_url):
     """Fetch and parse RSS feed"""
     try:
+        print(f"[DEBUG] Fetching feed {feed_id} from {feed_url}")
         feed = feedparser.parse(feed_url)
         
+        print(f"[DEBUG] Feed status: {feed.get('status', 'unknown')}")
+        print(f"[DEBUG] Feed entries count: {len(feed.entries)}")
+        
+        if hasattr(feed, 'bozo') and feed.bozo:
+            print(f"[DEBUG] Feed parsing warning: {feed.bozo_exception}")
+        
         items = []
-        for entry in feed.entries[:15]:  # Get latest 15 items
+        for entry in feed.entries[:15]:
             title = entry.get('title', 'No title')
             description = entry.get('description', entry.get('summary', ''))
             link = entry.get('link', '')
-            pub_date = entry.get('published', '')
+            pub_date = entry.get('published', entry.get('updated', ''))
             
             # Remove HTML tags from description
             clean_desc = re.sub('<[^<]+?>', '', description)
@@ -32,10 +100,14 @@ def fetch_feed(feed_id, feed_url):
             }
             
             items.append(item)
+            print(f"[DEBUG] Added item: {title[:50]}")
         
+        print(f"[DEBUG] Successfully parsed {len(items)} items from feed {feed_id}")
         return items
     except Exception as e:
-        print(f"Error fetching feed {feed_id}: {str(e)}")
+        print(f"[ERROR] Error fetching feed {feed_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def update_all_feeds():
